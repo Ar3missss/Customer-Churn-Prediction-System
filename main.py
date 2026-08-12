@@ -4,23 +4,16 @@ import pandas as pd
 import joblib
 import numpy as np
 
-# Initialize FastAPI
-app = FastAPI(
-    title="Customer Churn Prediction API",
-    description="Predicts customer churn probability and returns a retention strategy based on telecom data.",
-    version="1.0.0"
-)
+app = FastAPI(title="Customer Churn Prediction API", version="1.0.0")
 
 # Load model artifacts
 try:
     model = joblib.load('churn_model.pkl')
-    scaler = joblib.load('scaler.pkl')
-    features = joblib.load('model_features.pkl')
+    # We don't strictly need the features.pkl anymore because we will 
+    # extract the exact feature names directly from the model itself.
 except Exception as e:
     raise RuntimeError(f"Failed to load model artifacts: {e}")
 
-# Define the expected JSON payload structure
-# Updated to include ALL standard Telco columns your model was trained on
 class CustomerData(BaseModel):
     gender: str = 'Female'
     SeniorCitizen: int = 0
@@ -49,28 +42,29 @@ def read_root():
 @app.post("/predict")
 def predict_churn(customer: CustomerData):
     try:
-        # Convert incoming JSON to DataFrame
         input_df = pd.DataFrame([customer.dict()])
         
-        # Ensure TotalCharges is numeric (fixes common dataset string issue)
+        # Ensure TotalCharges is numeric
         input_df['TotalCharges'] = pd.to_numeric(input_df['TotalCharges'], errors='coerce').fillna(0)
         
-        # Safely scale numerical features IF your notebook used a scaler
-        if scaler and hasattr(scaler, 'feature_names_in_'):
-            scale_cols = [c for c in scaler.feature_names_in_ if c in input_df.columns]
-            if scale_cols:
-                input_df[scale_cols] = scaler.transform(input_df[scale_cols])
+        # 1. Apply pd.get_dummies() just like you did in your notebook
+        input_df = pd.get_dummies(input_df)
         
-        # We DO NOT run pd.get_dummies() here because your model expects 
-        # the raw 'Contract', 'Dependents', etc. columns.
-        
-        # Ensure all training columns exist (add missing ones as 0 just in case)
-        for col in features:
+        # 2. Get the EXACT feature names the model was trained on
+        # XGBoost and sklearn models store this in 'feature_names_in_'
+        if hasattr(model, 'feature_names_in_'):
+            trained_features = model.feature_names_in_
+        else:
+            # Fallback just in case
+            trained_features = joblib.load('model_features.pkl')
+            
+        # 3. Ensure all trained columns exist (add missing ones as 0)
+        for col in trained_features:
             if col not in input_df.columns:
                 input_df[col] = 0
                 
-        # Reorder columns to match exactly what the model was trained on
-        input_df = input_df[features]
+        # 4. Reorder columns to match exactly what the model expects
+        input_df = input_df[trained_features]
         
         # Predict
         churn_prob = float(model.predict_proba(input_df)[0][1])
