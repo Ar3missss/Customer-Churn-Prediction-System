@@ -9,8 +9,6 @@ app = FastAPI(title="Customer Churn Prediction API", version="1.0.0")
 # Load model artifacts
 try:
     model = joblib.load('churn_model.pkl')
-    # We don't strictly need the features.pkl anymore because we will 
-    # extract the exact feature names directly from the model itself.
 except Exception as e:
     raise RuntimeError(f"Failed to load model artifacts: {e}")
 
@@ -51,7 +49,6 @@ def predict_churn(customer: CustomerData):
         input_df = pd.get_dummies(input_df)
         
         # 2. Get the EXACT feature names the model was trained on
-        # XGBoost and sklearn models store this in 'feature_names_in_'
         if hasattr(model, 'feature_names_in_'):
             trained_features = model.feature_names_in_
         else:
