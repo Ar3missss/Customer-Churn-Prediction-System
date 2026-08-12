@@ -45,23 +45,27 @@ def predict_churn(customer: CustomerData):
         # Ensure TotalCharges is numeric
         input_df['TotalCharges'] = pd.to_numeric(input_df['TotalCharges'], errors='coerce').fillna(0)
         
-        # 1. Apply pd.get_dummies() just like you did in your notebook
-        input_df = pd.get_dummies(input_df)
+        # 1. We DO NOT run pd.get_dummies() here.
+        # The model expects the raw string columns like 'Contract' and 'Dependents'.
         
         # 2. Get the EXACT feature names the model was trained on
         if hasattr(model, 'feature_names_in_'):
-            trained_features = model.feature_names_in_
+            trained_features = list(model.feature_names_in_)
         else:
-            # Fallback just in case
             trained_features = joblib.load('model_features.pkl')
             
-        # 3. Ensure all trained columns exist (add missing ones as 0)
+        # 3. Ensure all trained columns exist (add missing ones as 0 just in case)
         for col in trained_features:
             if col not in input_df.columns:
                 input_df[col] = 0
                 
         # 4. Reorder columns to match exactly what the model expects
         input_df = input_df[trained_features]
+        
+        # 5. Cast object columns to 'category' type
+        # This fixes the "could not convert string to float" error for XGBoost
+        for col in input_df.select_dtypes(include=['object']).columns:
+            input_df[col] = input_df[col].astype('category')
         
         # Predict
         churn_prob = float(model.predict_proba(input_df)[0][1])
