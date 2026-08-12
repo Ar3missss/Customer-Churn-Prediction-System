@@ -11,23 +11,36 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Load model artifacts (make sure these files are in the same directory)
+# Load model artifacts
 try:
     model = joblib.load('churn_model.pkl')
-    scaler = joblib.load('scaler.pkl') # If you didn't use a scaler, remove this
+    scaler = joblib.load('scaler.pkl')
     features = joblib.load('model_features.pkl')
 except Exception as e:
     raise RuntimeError(f"Failed to load model artifacts: {e}")
 
 # Define the expected JSON payload structure
+# Updated to include ALL standard Telco columns your model was trained on
 class CustomerData(BaseModel):
-    tenure: int
-    MonthlyCharges: float
-    TotalCharges: float
-    Contract: str  # e.g., 'Month-to-month', 'One year', 'Two year'
-    InternetService: str  # e.g., 'DSL', 'Fiber optic', 'No'
-    TechSupport: str  # e.g., 'Yes', 'No', 'No internet service'
-    # Add any other features your model expects here...
+    gender: str = 'Female'
+    SeniorCitizen: int = 0
+    Partner: str = 'Yes'
+    Dependents: str = 'No'
+    tenure: int = 2
+    PhoneService: str = 'Yes'
+    MultipleLines: str = 'No'
+    InternetService: str = 'Fiber optic'
+    OnlineSecurity: str = 'No'
+    OnlineBackup: str = 'No'
+    DeviceProtection: str = 'No'
+    TechSupport: str = 'No'
+    StreamingTV: str = 'No'
+    StreamingMovies: str = 'No'
+    Contract: str = 'Month-to-month'
+    PaperlessBilling: str = 'Yes'
+    PaymentMethod: str = 'Electronic check'
+    MonthlyCharges: float = 85.5
+    TotalCharges: float = 150.0
 
 @app.get("/")
 def read_root():
@@ -39,17 +52,25 @@ def predict_churn(customer: CustomerData):
         # Convert incoming JSON to DataFrame
         input_df = pd.DataFrame([customer.dict()])
         
-        # One-hot encode (must match your notebook's preprocessing)
-        input_df = pd.get_dummies(input_df, columns=['Contract', 'InternetService', 'TechSupport'])
+        # Ensure TotalCharges is numeric (fixes common dataset string issue)
+        input_df['TotalCharges'] = pd.to_numeric(input_df['TotalCharges'], errors='coerce').fillna(0)
         
-        # Ensure all training columns exist (add missing ones as 0)
+        # Safely scale numerical features IF your notebook used a scaler
+        if scaler and hasattr(scaler, 'feature_names_in_'):
+            scale_cols = [c for c in scaler.feature_names_in_ if c in input_df.columns]
+            if scale_cols:
+                input_df[scale_cols] = scaler.transform(input_df[scale_cols])
+        
+        # We DO NOT run pd.get_dummies() here because your model expects 
+        # the raw 'Contract', 'Dependents', etc. columns.
+        
+        # Ensure all training columns exist (add missing ones as 0 just in case)
         for col in features:
             if col not in input_df.columns:
                 input_df[col] = 0
+                
+        # Reorder columns to match exactly what the model was trained on
         input_df = input_df[features]
-        
-        # Scale numerical features (if you used a scaler in your notebook)
-        input_df[['tenure', 'MonthlyCharges', 'TotalCharges']] = scaler.transform(input_df[['tenure', 'MonthlyCharges', 'TotalCharges']])
         
         # Predict
         churn_prob = float(model.predict_proba(input_df)[0][1])
